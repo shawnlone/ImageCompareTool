@@ -1,9 +1,9 @@
 # 图片对比工具
 
 一个简单的桌面图片对比工具。  
-平时改 UI、看截图、核对设计稿的时候，经常需要把两张图放在一起看差异，所以做了这个小工具。
+平时改 UI、看截图、核对设计稿的时候，经常需要把两张图放在一起看差异，所以做了这个工具。
 
-目前主要支持左右滑动对比，也可以拖拽、粘贴图片，适合快速看「改前 / 改后」。
+支持左右滑动对比，也可以拖拽、粘贴图片，适合快速看「改前 / 改后」。
 
 ## 功能
 
@@ -48,7 +48,8 @@ python -m image_compare_tool.app
 dist/ImageCompareTool.exe
 ```
 
-单文件 exe 第一次启动会慢一点，这是 PyInstaller 单文件模式的正常现象。
+单文件 exe 第一次启动会慢一点，这是 PyInstaller 单文件模式的正常现象。  
+如果比较在意启动速度，可以改用 `onedir` 模式打包。
 
 ## 快捷键
 
@@ -61,13 +62,10 @@ dist/ImageCompareTool.exe
 
 ## 反馈
 
-如果遇到问题，或者有功能建议，可以通过下面的表单反馈：
+如果遇到问题，或者有功能建议，除了 GitHub Issues 之外，也可以通过下面的表单快速反馈：
 
 https://my.feishu.cn/share/base/form/shrcnu1BRg8IsfimXzWCCFhbSXd
 
-GitHub：
-
-https://github.com/shawnlone/ImageCompareTool
 
 ## License
 
