@@ -81,7 +81,7 @@
 ### 方式一：直接运行入口脚本
 
 ```bash
-python image_compare_pyside6_v10.py
+python image_compare_tool.py
 ```
 
 ### 方式二：运行拆分后的模块入口
@@ -106,7 +106,7 @@ pip install PySide6 Pillow
 
 ```text
 ImageCompareTool/
-├─ image_compare_pyside6_v10.py   # 兼容入口
+├─ image_compare_tool.py          # 兼容入口
 ├─ app.ico
 ├─ image_compare_tool/
 │  ├─ app.py                      # 应用入口

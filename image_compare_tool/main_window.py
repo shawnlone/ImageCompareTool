@@ -354,10 +354,9 @@ class MainWindow(QMainWindow):
                     图片对比工具
                 </div>
                 <div style="color:#cfcfcf;">
-                    版本：1.5<br>
-                    作者：你的名字<br>
-                    邮箱：your@email.com<br>
-                    官网：<a href="https://example.com" style="color:#6aa9ff;">https://example.com</a>
+                    版本：1.6<br>
+                    快速反馈：<a href="https://my.feishu.cn/share/base/form/shrcnu1BRg8IsfimXzWCCFhbSXd" style="color:#6aa9ff;">https://my.feishu.cn/share/base/form/shrcnu1BRg8IsfimXzWCCFhbSXd</a><br>
+                    GitHub：<a href="https://github.com/shawnlone/ImageCompareTool" style="color:#6aa9ff;">https://github.com/shawnlone/ImageCompareTool</a>
                 </div>
             </div>
             """

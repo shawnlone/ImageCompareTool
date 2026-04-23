@@ -1,7 +1,7 @@
 IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.webp);;All Files (*.*)"
 PROJECT_EXT = ".icp"
 PROJECT_FILTER = "Image Compare Project (*.icp)"
-DEFAULT_TAB_TITLE = "????"
+DEFAULT_TAB_TITLE = "新的对比"
 
 LABEL_STYLE_DEFAULTS = {
     "a_text": "Before",

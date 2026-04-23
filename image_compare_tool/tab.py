@@ -88,7 +88,6 @@ class CompareTab(QWidget):
         self._compare_prepare_token += 1
         token = self._compare_prepare_token
         self.content_stack.setCurrentWidget(self.compare_canvas)
-        self.show_toast("正在准备对比图...", 1200)
         self.thread_pool.start(ComparePrepareWorker(token, self.img_a, self.img_b, self.worker_signals))
 
     def _on_image_loaded(self, token, side, path, img):
