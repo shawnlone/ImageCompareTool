@@ -1,17 +1,32 @@
 import os
 import sys
+import ctypes
 
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .constants import PROJECT_EXT
-from .image_utils import open_image_rgba, pil_to_qimage
+from .image_utils import open_image_rgba, pil_to_qimage, resource_path
 from .main_window import MainWindow
 
+
+def set_windows_app_id():
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "shawnlone.ImageCompareTool"
+        )
+    except Exception:
+        pass
+
+
 def main():
+    set_windows_app_id()
     app = QApplication(sys.argv)
     app.setApplicationName("图片对比工具")
+    app.setWindowIcon(QIcon(resource_path("app.ico")))
 
     win = MainWindow()
 
