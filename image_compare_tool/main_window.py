@@ -171,26 +171,29 @@ class MainWindow(QMainWindow):
     def _setup_actions(self):
         paste_action = QAction(self)
         paste_action.setShortcut(QKeySequence.Paste)
+        paste_action.setShortcutContext(Qt.ApplicationShortcut)
         paste_action.triggered.connect(self.on_paste)
         self.addAction(paste_action)
 
-        copy_action = QAction(self)
-        copy_action.setShortcut(QKeySequence.Copy)
-        copy_action.triggered.connect(self.copy_current_view)
-        self.addAction(copy_action)
+        self.copy_shortcut = QShortcut(QKeySequence("Ctrl+C"), self)
+        self.copy_shortcut.setContext(Qt.ApplicationShortcut)
+        self.copy_shortcut.activated.connect(self.copy_current_view)
 
         save_action = QAction(self)
         save_action.setShortcut(QKeySequence.Save)
+        save_action.setShortcutContext(Qt.ApplicationShortcut)
         save_action.triggered.connect(self.save_current_project)
         self.addAction(save_action)
 
         close_tab_action = QAction(self)
         close_tab_action.setShortcut(QKeySequence("Ctrl+W"))
+        close_tab_action.setShortcutContext(Qt.ApplicationShortcut)
         close_tab_action.triggered.connect(self.close_current_tab)
         self.addAction(close_tab_action)
 
         new_tab_action = QAction(self)
         new_tab_action.setShortcut(QKeySequence("Ctrl+T"))
+        new_tab_action.setShortcutContext(Qt.ApplicationShortcut)
         new_tab_action.triggered.connect(self.add_new_tab)
         self.addAction(new_tab_action)
 
@@ -480,6 +483,10 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         tab = self.current_tab()
+
+        if event.key() == Qt.Key_C and event.modifiers() == Qt.ControlModifier:
+            self.copy_current_view()
+            return
 
         if event.key() == Qt.Key_T and event.modifiers() != Qt.ControlModifier:
             self.toggle_always_on_top()

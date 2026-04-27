@@ -1,7 +1,7 @@
 from PIL import Image
 
 from PySide6.QtCore import QPointF, QRectF, QTimer, Qt
-from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFont, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFont, QGuiApplication, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from .constants import LABEL_STYLE_DEFAULTS
