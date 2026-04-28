@@ -2,7 +2,7 @@ from PySide6.QtCore import QTimer, QPoint, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QDialog, QFormLayout, QFrame,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSlider,
+    QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSlider,
     QSpinBox, QVBoxLayout, QWidget
 )
 
@@ -317,29 +317,29 @@ class LabelStyleDialog(RoundedDialog):
 
         root = self.content_layout
 
+        form = QFormLayout()
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(9)
+        root.addLayout(form)
+
+        def add_gap(height=2):
+            spacer = QWidget()
+            spacer.setFixedHeight(height)
+            form.addRow(spacer)
+
         self.a_text = QLineEdit(cfg["a_text"])
         self.a_color = ColorButton(cfg["a_text_color"])
+        form.addRow("A标题", self.a_text)
+        form.addRow("A标题颜色", self.a_color)
 
-        form_a = QFormLayout()
-        form_a.setHorizontalSpacing(12)
-        form_a.setVerticalSpacing(9)
-        form_a.addRow("A标题", self.a_text)
-        form_a.addRow("A标题颜色", self.a_color)
-        root.addLayout(form_a)
-
-        root.addSpacing(16)
+        add_gap()
 
         self.b_text = QLineEdit(cfg["b_text"])
         self.b_color = ColorButton(cfg["b_text_color"])
+        form.addRow("B标题", self.b_text)
+        form.addRow("B标题颜色", self.b_color)
 
-        form_b = QFormLayout()
-        form_b.setHorizontalSpacing(12)
-        form_b.setVerticalSpacing(9)
-        form_b.addRow("B标题", self.b_text)
-        form_b.addRow("B标题颜色", self.b_color)
-        root.addLayout(form_b)
-
-        root.addSpacing(16)
+        add_gap()
 
         self.font_size = QSpinBox()
         self.font_size.setRange(8, 72)
@@ -364,22 +364,15 @@ class LabelStyleDialog(RoundedDialog):
         self.offset_y.setRange(0, 300)
         self.offset_y.setValue(cfg["offset_y"])
 
-        form_common1 = QFormLayout()
-        form_common1.setHorizontalSpacing(12)
-        form_common1.setVerticalSpacing(9)
-        form_common1.addRow("文本尺寸", self.font_size)
-        form_common1.addRow("背景颜色", self.bg_color)
-        form_common1.addRow("背景透明度", self.bg_alpha)
-        root.addLayout(form_common1)
-        root.addSpacing(16)
+        form.addRow("文本尺寸", self.font_size)
+        form.addRow("背景颜色", self.bg_color)
+        form.addRow("背景透明度", self.bg_alpha)
 
-        form_common2 = QFormLayout()
-        form_common2.setHorizontalSpacing(12)
-        form_common2.setVerticalSpacing(9)
-        form_common2.addRow("显示位置", self.position)
-        form_common2.addRow("X偏移", self.offset_x)
-        form_common2.addRow("Y偏移", self.offset_y)
-        root.addLayout(form_common2)
+        add_gap()
+
+        form.addRow("显示位置", self.position)
+        form.addRow("X偏移", self.offset_x)
+        form.addRow("Y偏移", self.offset_y)
 
         root.addSpacing(18)
 
@@ -800,7 +793,7 @@ class DropPanel(QFrame):
         self.compare_tab = compare_tab
         self.setAcceptDrops(True)
         self.setObjectName("DropPanel")
-        self.setMinimumHeight(500)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self._original_pixmap = None
 
@@ -848,6 +841,10 @@ class DropPanel(QFrame):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+
+        button_size = max(58, min(96, int(min(self.preview.width(), self.preview.height()) * 0.36)))
+        if self.button.width() != button_size:
+            self.button.setFixedSize(button_size, button_size)
 
         bx = (self.preview.width() - self.button.width()) // 2
         by = (self.preview.height() - self.button.height()) // 2
@@ -915,7 +912,7 @@ class HelpPopup(QFrame):
                 "中键单击: 显示原比例",
             ]),
             ("图像切换", [
-                "1/2键: 切换显示A/B",
+                "1/2/3键: A/B/AB",
                 "空格键: 切换黑白/彩色",
                 "Tab键: 交换A/B位置",
             ]),

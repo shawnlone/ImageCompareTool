@@ -11,6 +11,9 @@ from .image_utils import pil_to_qimage, prepare_compare_images, to_grayscale_rgb
 ZOOM_STEP = 1.1
 MIN_ZOOM = 0.4 / ZOOM_STEP
 MAX_ZOOM = 2.0 * ZOOM_STEP
+VIEW_MODE_SPLIT = "split"
+VIEW_MODE_HORIZONTAL = "horizontal"
+HORIZONTAL_GAP = 2
 
 
 class CompareCanvas(QWidget):
@@ -33,6 +36,7 @@ class CompareCanvas(QWidget):
         self.orig_w = 0
         self.orig_h = 0
         self.swapped = False
+        self.view_mode = VIEW_MODE_SPLIT
 
         self.zoom = None
         self.split = 0.0
@@ -88,8 +92,13 @@ class CompareCanvas(QWidget):
         if self.pm_a is None or self.pm_b is None or self.orig_w <= 0 or self.orig_h <= 0:
             return QImage()
 
-        target_w = int(out_w if out_w is not None else self.orig_w)
-        target_h = int(out_h if out_h is not None else self.orig_h)
+        if self.view_mode == VIEW_MODE_HORIZONTAL:
+            source_w, source_h = self._content_size()
+        else:
+            source_w, source_h = self.orig_w, self.orig_h
+
+        target_w = int(out_w if out_w is not None else source_w)
+        target_h = int(out_h if out_h is not None else source_h)
 
         if target_w <= 0 or target_h <= 0:
             return QImage()
@@ -100,6 +109,23 @@ class CompareCanvas(QWidget):
         p = QPainter(image)
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+
+        if self.view_mode == VIEW_MODE_HORIZONTAL:
+            z = min(target_w / source_w, target_h / source_h)
+            img_w = self.orig_w * z
+            img_h = self.orig_h * z
+            gap_w = HORIZONTAL_GAP * z
+            total_w = img_w * 2 + gap_w
+            img_left = (target_w - total_w) / 2
+            img_top = (target_h - img_h) / 2
+
+            a_rect = QRectF(img_left, img_top, img_w, img_h)
+            b_rect = QRectF(img_left + img_w + gap_w, img_top, img_w, img_h)
+            p.drawPixmap(a_rect, self.pm_a, QRectF(0, 0, self.orig_w, self.orig_h))
+            p.drawPixmap(b_rect, self.pm_b, QRectF(0, 0, self.orig_w, self.orig_h))
+            self._draw_horizontal_labels(p, a_rect, b_rect, view_w=target_w, view_h=target_h)
+            p.end()
+            return image
 
         z = target_w / self.orig_w
         img_left = 0.0
@@ -157,7 +183,7 @@ class CompareCanvas(QWidget):
         return image
 
     def copy_current_view_to_clipboard(self):
-        qimg = self.render_compare_to_image(self.orig_w, self.orig_h)
+        qimg = self.render_compare_to_image()
         if qimg.isNull():
             return False
         QGuiApplication.clipboard().setImage(qimg)
@@ -183,6 +209,7 @@ class CompareCanvas(QWidget):
         self.orig_w = w
         self.orig_h = h
         self.swapped = False
+        self.view_mode = VIEW_MODE_SPLIT
         self.handle_y = h / 2
 
         self.zoom = None
@@ -247,11 +274,17 @@ class CompareCanvas(QWidget):
         if self.zoom is None:
             cw = max(self.width(), 1)
             ch = max(self.height(), 1)
-            self.zoom = min(cw / self.orig_w, ch / self.orig_h)
-            dw = self.orig_w * self.zoom
-            dh = self.orig_h * self.zoom
+            content_w, content_h = self._content_size()
+            self.zoom = min(cw / content_w, ch / content_h)
+            dw = content_w * self.zoom
+            dh = content_h * self.zoom
             self.vp_x = -(cw - dw) / (2 * self.zoom)
             self.vp_y = -(ch - dh) / (2 * self.zoom)
+
+    def _content_size(self):
+        if self.view_mode == VIEW_MODE_HORIZONTAL:
+            return self.orig_w * 2 + HORIZONTAL_GAP, self.orig_h
+        return self.orig_w, self.orig_h
 
     def schedule_hq(self, delay=80):
         self.drag_quality_job.start(delay)
@@ -270,7 +303,7 @@ class CompareCanvas(QWidget):
             self.original_size(event.position())
             return
 
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.LeftButton and self.view_mode == VIEW_MODE_SPLIT:
             self.left_dragging = True
             z = self.zoom
             self.split = (event.position().x() + self.vp_x * z) / z
@@ -290,6 +323,8 @@ class CompareCanvas(QWidget):
             return
 
         if self.left_dragging:
+            if self.view_mode != VIEW_MODE_SPLIT:
+                return
             z = self.zoom
             self.split = (event.position().x() + self.vp_x * z) / z
             self.split = max(0, min(self.split, self.orig_w))
@@ -369,6 +404,16 @@ class CompareCanvas(QWidget):
         img_rect = QRectF(img_left, img_top, img_w, img_h)
 
         p.setRenderHint(QPainter.SmoothPixmapTransform, self.hq_mode)
+
+        if self.view_mode == VIEW_MODE_HORIZONTAL:
+            gap_w = HORIZONTAL_GAP * z
+            a_rect = img_rect
+            b_rect = QRectF(img_left + img_w + gap_w, img_top, img_w, img_h)
+            p.drawPixmap(a_rect, self.pm_a, QRectF(0, 0, self.orig_w, self.orig_h))
+            p.drawPixmap(b_rect, self.pm_b, QRectF(0, 0, self.orig_w, self.orig_h))
+            self._draw_horizontal_labels(p, a_rect, b_rect)
+            p.end()
+            return
 
         sx = self.split * z - self.vp_x * z
         sx = max(0.0, min(sx, float(cw)))
@@ -494,6 +539,61 @@ class CompareCanvas(QWidget):
             draw_one(label_b, bx, by, color_b, align_right=True)
             p.restore()
 
+    def _draw_horizontal_labels(self, p: QPainter, a_rect, b_rect, view_w=None, view_h=None):
+        pad = 12
+        vw = self.width() if view_w is None else view_w
+        vh = self.height() if view_h is None else view_h
+
+        cfg = self.compare_tab.label_style if self.compare_tab else LABEL_STYLE_DEFAULTS
+        label_a = cfg["b_text"] if self.swapped else cfg["a_text"]
+        label_b = cfg["a_text"] if self.swapped else cfg["b_text"]
+        color_a = cfg["b_text_color"] if self.swapped else cfg["a_text_color"]
+        color_b = cfg["a_text_color"] if self.swapped else cfg["b_text_color"]
+
+        font = QFont("Microsoft YaHei", cfg["font_size"])
+        font.setBold(True)
+        p.setFont(font)
+        fm = p.fontMetrics()
+
+        def draw_one(text, x, y, text_color, align_right=False):
+            tw = fm.horizontalAdvance(text)
+            th = fm.height()
+            rw = tw + 24
+            rh = th + 12
+            rect = QRectF(x - rw, y, rw, rh) if align_right else QRectF(x, y, rw, rh)
+
+            path = QPainterPath()
+            path.addRoundedRect(rect, 6, 6)
+            bg = QColor(cfg["bg_color"])
+            bg.setAlpha(cfg.get("bg_alpha", 170))
+            p.fillPath(path, bg)
+            p.setPen(QColor(text_color))
+            p.drawText(rect, Qt.AlignCenter, text)
+
+        pos = cfg["position"]
+        offset_x = cfg["offset_x"]
+        offset_y = cfg["offset_y"]
+        label_h = fm.height() + 12
+
+        def label_y(rect):
+            if pos == "top":
+                return max(pad, rect.top() + pad) + offset_y
+            if pos == "center":
+                return rect.top() + (rect.height() - label_h) / 2 + offset_y
+            return min(vh - pad - label_h, rect.bottom() - pad - label_h) - offset_y
+
+        if a_rect.right() > 1 and a_rect.left() < vw - 1:
+            p.save()
+            p.setClipRect(QRectF(max(0, a_rect.left()), 0, max(0.0, min(vw, a_rect.right()) - max(0, a_rect.left())), vh))
+            draw_one(label_a, max(pad, a_rect.left() + pad) + offset_x, label_y(a_rect), color_a)
+            p.restore()
+
+        if b_rect.right() > 1 and b_rect.left() < vw - 1:
+            p.save()
+            p.setClipRect(QRectF(max(0, b_rect.left()), 0, max(0.0, min(vw, b_rect.right()) - max(0, b_rect.left())), vh))
+            draw_one(label_b, min(vw - pad, b_rect.right() - pad) - offset_x, label_y(b_rect), color_b, align_right=True)
+            p.restore()
+
     def dragEnterEvent(self, event: QDragEnterEvent):
         accept_drop_if_has_file(event)
 
@@ -527,6 +627,10 @@ class CompareCanvas(QWidget):
     def show_only_a(self):
         if self.pm_a is None:
             return
+        reset_view = self.view_mode != VIEW_MODE_SPLIT
+        self.view_mode = VIEW_MODE_SPLIT
+        if reset_view:
+            self.zoom = None
         self.split = self.orig_w
         self.update()
         self.notify_status_changed()
@@ -534,6 +638,20 @@ class CompareCanvas(QWidget):
     def show_only_b(self):
         if self.pm_a is None:
             return
+        reset_view = self.view_mode != VIEW_MODE_SPLIT
+        self.view_mode = VIEW_MODE_SPLIT
+        if reset_view:
+            self.zoom = None
         self.split = 0
+        self.update()
+        self.notify_status_changed()
+
+    def show_horizontal_ab(self):
+        if self.pm_a is None:
+            return
+        self.view_mode = VIEW_MODE_HORIZONTAL
+        self.left_dragging = False
+        self.zoom = None
+        self.hq_mode = True
         self.update()
         self.notify_status_changed()

@@ -3,7 +3,7 @@ import os
 import sys
 import ctypes
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QTimer, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QAction, QColor, QCursor, QIcon, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMenu,
@@ -207,13 +207,14 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.base_title = "图片对比工具 1.6"
-        self.always_on_top = True
+        self.always_on_top = False
         self.label_style_dialog = None
         self.global_label_style = self.load_label_style()
 
         self.tabs = []
         self.current_tab_index = -1
         self._resize_margin = 4
+        self._resize_cursor_shape = None
 
         self.update_window_title()
         self.setWindowIcon(QIcon(resource_path("app.ico")))
@@ -348,7 +349,7 @@ class MainWindow(QMainWindow):
         self.window_host.setObjectName("WindowHost")
         self.window_host.setMouseTracking(True)
         self.window_host_layout = QVBoxLayout(self.window_host)
-        self.window_host_layout.setContentsMargins(14, 10, 14, 22)
+        self.window_host_layout.setContentsMargins(10, 10, 10, 10)
         self.window_host_layout.setSpacing(0)
         self.window_host_layout.addWidget(self.window_frame)
         self.window_host.set_frame_widget(self.window_frame)
@@ -471,7 +472,7 @@ class MainWindow(QMainWindow):
         maximized = self.isMaximized()
         left = top = right = bottom = 0
         if not maximized:
-            left, top, right, bottom = 14, 10, 14, 22
+            left = top = right = bottom = 10
         radius = 0 if maximized else 8
         control_radius = 0 if maximized else 5
         self.window_host_layout.setContentsMargins(left, top, right, bottom)
@@ -534,13 +535,8 @@ class MainWindow(QMainWindow):
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() == QEvent.WindowStateChange:
-            self.unsetCursor()
+            self._clear_resize_cursor()
             self._update_window_chrome()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if hasattr(self, "window_frame"):
-            QTimer.singleShot(0, self._refresh_cursor_under_mouse)
 
     def _resize_edges_at(self, pos):
         if self.isMaximized():
@@ -573,34 +569,41 @@ class MainWindow(QMainWindow):
     def _update_resize_cursor(self, pos):
         edges = self._resize_edges_at(pos)
         if edges in (Qt.LeftEdge | Qt.TopEdge, Qt.RightEdge | Qt.BottomEdge):
-            self.setCursor(Qt.SizeFDiagCursor)
+            self._set_resize_cursor(Qt.SizeFDiagCursor)
         elif edges in (Qt.RightEdge | Qt.TopEdge, Qt.LeftEdge | Qt.BottomEdge):
-            self.setCursor(Qt.SizeBDiagCursor)
+            self._set_resize_cursor(Qt.SizeBDiagCursor)
         elif edges & (Qt.LeftEdge | Qt.RightEdge):
-            self.setCursor(Qt.SizeHorCursor)
+            self._set_resize_cursor(Qt.SizeHorCursor)
         elif edges & (Qt.TopEdge | Qt.BottomEdge):
-            self.setCursor(Qt.SizeVerCursor)
+            self._set_resize_cursor(Qt.SizeVerCursor)
         else:
-            self.unsetCursor()
+            self._clear_resize_cursor()
 
-    def _refresh_cursor_under_mouse(self):
-        if not self.isVisible() or self.isMinimized():
-            self.unsetCursor()
+    def _set_resize_cursor(self, shape):
+        if self._resize_cursor_shape == shape:
             return
+        self._resize_cursor_shape = shape
+        self.setCursor(shape)
+
+    def _clear_resize_cursor(self):
+        if self._resize_cursor_shape is None:
+            return
+        self._resize_cursor_shape = None
+        self.unsetCursor()
+
+    def _sync_resize_cursor_from_global(self):
         pos = self.mapFromGlobal(QCursor.pos())
-        frame_rect = QRect(self.window_frame.mapTo(self, QPoint(0, 0)), self.window_frame.size())
-        if frame_rect.adjusted(-self._resize_margin, -self._resize_margin, self._resize_margin, self._resize_margin).contains(pos):
+        if self._resize_cursor_shape is not None or self._resize_edges_at(pos):
             self._update_resize_cursor(pos)
-        else:
-            self.unsetCursor()
 
     def _handle_resize_mouse_event(self, event):
         if event.type() in (QEvent.Leave, QEvent.MouseButtonRelease):
-            self.unsetCursor()
+            self._clear_resize_cursor()
             return False
 
         if not hasattr(event, "position"):
             return False
+
         pos = self.mapFromGlobal(event.globalPosition().toPoint())
         edges = self._resize_edges_at(pos)
 
@@ -611,30 +614,9 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton and edges:
             window_handle = self.windowHandle()
             if window_handle is not None and window_handle.startSystemResize(edges):
+                event.accept()
                 return True
         return False
-
-    def mouseMoveEvent(self, event):
-        self._update_resize_cursor(event.position().toPoint())
-        super().mouseMoveEvent(event)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            edges = self._resize_edges_at(event.position().toPoint())
-            if edges:
-                window_handle = self.windowHandle()
-                if window_handle is not None and window_handle.startSystemResize(edges):
-                    event.accept()
-                    return
-        super().mousePressEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        self.unsetCursor()
-        super().mouseReleaseEvent(event)
-
-    def leaveEvent(self, event):
-        self.unsetCursor()
-        super().leaveEvent(event)
 
     def _setup_actions(self):
         paste_action = QAction(self)
@@ -834,7 +816,7 @@ class MainWindow(QMainWindow):
         dialog = RoundedDialog("关于", self)
         dialog.setMinimumWidth(440)
         dialog.setMinimumHeight(210)
-        dialog.content_layout.setContentsMargins(24, 22, 24, 22)
+        dialog.content_layout.setContentsMargins(24, 10, 24, 22)
 
         content = QLabel(
             """
@@ -934,15 +916,18 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
         if event.type() in (QEvent.MouseButtonRelease, QEvent.WindowDeactivate, QEvent.ApplicationDeactivate):
-            self.unsetCursor()
+            self._clear_resize_cursor()
 
-        if event.type() == QEvent.MouseMove:
-            widget = obj if isinstance(obj, QWidget) else None
-            if widget is not None and (widget == self or self.isAncestorOf(widget)):
-                self._refresh_cursor_under_mouse()
-
-        if obj in (self.window_host, self.window_frame) and self._handle_resize_mouse_event(event):
-            return True
+        widget = obj if isinstance(obj, QWidget) else None
+        if widget is not None and (widget == self or self.isAncestorOf(widget)):
+            if event.type() in (QEvent.Enter, QEvent.HoverMove, QEvent.MouseMove):
+                self._sync_resize_cursor_from_global()
+            elif event.type() == QEvent.MouseButtonPress and hasattr(event, "globalPosition"):
+                pos = self.mapFromGlobal(event.globalPosition().toPoint())
+                if self._resize_edges_at(pos) and self._handle_resize_mouse_event(event):
+                    return True
+            elif event.type() in (QEvent.Leave, QEvent.MouseButtonRelease):
+                self._clear_resize_cursor()
 
         tab = self.current_tab()
         if tab and tab.help_popup.isVisible():
@@ -977,6 +962,9 @@ class MainWindow(QMainWindow):
                 return
             if event.key() == Qt.Key_2:
                 tab.compare_canvas.show_only_b()
+                return
+            if event.key() == Qt.Key_3:
+                tab.compare_canvas.show_horizontal_ab()
                 return
             if event.key() == Qt.Key_F:
                 self.open_label_style_dialog()
