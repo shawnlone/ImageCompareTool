@@ -1,4 +1,4 @@
-from PySide6.QtCore import QTimer, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QTimer, QPoint, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QDialog, QFormLayout, QFrame,
@@ -79,14 +79,150 @@ class ColorButton(QPushButton):
         return self._color
 
 
-class LabelStyleDialog(QDialog):
-    def __init__(self, main_window):
-        super().__init__(main_window)
+class DialogCloseButton(QPushButton):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(32, 28)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setObjectName("DialogCloseButton")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(QPen(QColor("#f2f2f2"), 1.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        c = self.rect().center()
+        cx = c.x()
+        cy = c.y() + 1
+        p.drawLine(cx - 4, cy - 4, cx + 4, cy + 4)
+        p.drawLine(cx + 4, cy - 4, cx - 4, cy + 4)
+
+
+class DialogTitleBar(QWidget):
+    def __init__(self, title, dialog):
+        super().__init__(dialog)
+        self.dialog = dialog
+        self.setFixedHeight(34)
+        self.setObjectName("DialogTitleBar")
+
+        self.title_label = QLabel(title)
+        self.title_label.setObjectName("DialogTitleText")
+        self.title_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.title_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+        self.close_button = DialogCloseButton()
+        self.close_button.clicked.connect(dialog.close)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 4, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.title_label, 1)
+        layout.addWidget(self.close_button, 0)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            window_handle = self.dialog.windowHandle()
+            if window_handle is not None and window_handle.startSystemMove():
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+
+class DialogShadowHost(QWidget):
+    def __init__(self):
+        super().__init__()
+        self._frame_widget = None
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+    def set_frame_widget(self, widget):
+        self._frame_widget = widget
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._frame_widget is None:
+            return
+
+        frame_rect = self._frame_widget.geometry()
+        if frame_rect.isEmpty():
+            return
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        for i in range(5, 0, -1):
+            alpha = max(0, 12 - i * 2)
+            if alpha <= 0:
+                continue
+            rect = frame_rect.adjusted(-i, -i, i, i + 2)
+            p.setBrush(QColor(0, 0, 0, alpha))
+            p.drawRoundedRect(rect, 8 + i, 8 + i)
+
+        bg_rect = QRectF(frame_rect).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setBrush(QColor("#202020"))
+        p.drawRoundedRect(bg_rect, 8, 8)
+        p.setPen(QPen(QColor("#303030"), 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(bg_rect, 8, 8)
+
+
+class RoundedDialog(QDialog):
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self.host = DialogShadowHost()
+        outer.addWidget(self.host)
+
+        host_layout = QVBoxLayout(self.host)
+        host_layout.setContentsMargins(12, 10, 12, 16)
+        host_layout.setSpacing(0)
+
+        self.frame = QWidget()
+        self.frame.setObjectName("DialogFrame")
+        host_layout.addWidget(self.frame)
+        self.host.set_frame_widget(self.frame)
+
+        frame_layout = QVBoxLayout(self.frame)
+        frame_layout.setContentsMargins(1, 1, 1, 1)
+        frame_layout.setSpacing(0)
+
+        self.title_bar = DialogTitleBar(title, self)
+        frame_layout.addWidget(self.title_bar)
+
+        self.content_widget = QWidget()
+        self.content_widget.setObjectName("DialogContent")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(16, 20, 16, 20)
+        self.content_layout.setSpacing(0)
+        frame_layout.addWidget(self.content_widget)
 
         self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e1e;
+            QWidget#DialogFrame {
+                background-color: transparent;
+                border: none;
+                border-radius: 8px;
+            }
+            QWidget#DialogTitleBar {
+                background-color: transparent;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                border-bottom: 1px solid #2a2a2a;
+            }
+            QLabel#DialogTitleText {
                 color: white;
+                font: 10pt "Microsoft YaHei UI";
+            }
+            QWidget#DialogContent {
+                background-color: transparent;
+                border-bottom-left-radius: 8px;
+                border-bottom-right-radius: 8px;
             }
             QLabel {
                 color: white;
@@ -155,35 +291,55 @@ class LabelStyleDialog(QDialog):
                 color: white;
                 spacing: 6px;
             }
+            QPushButton#DialogCloseButton {
+                background: transparent;
+                border: none;
+                border-radius: 5px;
+                padding: 0px;
+            }
+            QPushButton#DialogCloseButton:hover {
+                background: #c42b1c;
+            }
+            QPushButton#DialogCloseButton:pressed {
+                background: #9f2318;
+            }
         """)
 
+
+class LabelStyleDialog(RoundedDialog):
+    def __init__(self, main_window):
+        super().__init__("对比设置", main_window)
+
         self.main_window = main_window
-        self.setWindowTitle("对比标题设置")
-        self.setMinimumWidth(320)
+        self.setMinimumWidth(380)
 
         cfg = self.main_window.get_current_label_style()
 
-        root = QVBoxLayout(self)
+        root = self.content_layout
 
         self.a_text = QLineEdit(cfg["a_text"])
         self.a_color = ColorButton(cfg["a_text_color"])
 
         form_a = QFormLayout()
+        form_a.setHorizontalSpacing(12)
+        form_a.setVerticalSpacing(9)
         form_a.addRow("A标题", self.a_text)
         form_a.addRow("A标题颜色", self.a_color)
         root.addLayout(form_a)
 
-        root.addSpacing(12)
+        root.addSpacing(16)
 
         self.b_text = QLineEdit(cfg["b_text"])
         self.b_color = ColorButton(cfg["b_text_color"])
 
         form_b = QFormLayout()
+        form_b.setHorizontalSpacing(12)
+        form_b.setVerticalSpacing(9)
         form_b.addRow("B标题", self.b_text)
         form_b.addRow("B标题颜色", self.b_color)
         root.addLayout(form_b)
 
-        root.addSpacing(12)
+        root.addSpacing(16)
 
         self.font_size = QSpinBox()
         self.font_size.setRange(8, 72)
@@ -209,19 +365,23 @@ class LabelStyleDialog(QDialog):
         self.offset_y.setValue(cfg["offset_y"])
 
         form_common1 = QFormLayout()
+        form_common1.setHorizontalSpacing(12)
+        form_common1.setVerticalSpacing(9)
         form_common1.addRow("文本尺寸", self.font_size)
         form_common1.addRow("背景颜色", self.bg_color)
         form_common1.addRow("背景透明度", self.bg_alpha)
         root.addLayout(form_common1)
-        root.addSpacing(12)
+        root.addSpacing(16)
 
         form_common2 = QFormLayout()
+        form_common2.setHorizontalSpacing(12)
+        form_common2.setVerticalSpacing(9)
         form_common2.addRow("显示位置", self.position)
         form_common2.addRow("X偏移", self.offset_x)
         form_common2.addRow("Y偏移", self.offset_y)
         root.addLayout(form_common2)
 
-        root.addSpacing(12)
+        root.addSpacing(18)
 
         self.hide_split_line = QCheckBox("隐藏对比分割线")
         self.hide_split_line.setChecked(cfg.get("hide_split_line", False))
@@ -233,9 +393,7 @@ class LabelStyleDialog(QDialog):
         btn_row.addStretch(1)
 
         self.reset_btn = QPushButton("重置默认")
-        self.close_btn = QPushButton("关闭")
         btn_row.addWidget(self.reset_btn)
-        btn_row.addWidget(self.close_btn)
 
         self.a_text.textChanged.connect(self.apply_changes)
         self.a_color.color_changed.connect(self.apply_changes)
@@ -251,7 +409,6 @@ class LabelStyleDialog(QDialog):
         self.offset_y.valueChanged.connect(self.apply_changes)
         self.hide_split_line.toggled.connect(self.apply_changes)
         self.reset_btn.clicked.connect(self.reset_defaults)
-        self.close_btn.clicked.connect(self.accept)
 
         self.sync_bg_button_preview()
 
@@ -316,10 +473,11 @@ class TabButton(QWidget):
         self.is_add = is_add
         self.active = False
         self.hovered = False
+        self.close_hovered = False
         self._pressed = False
 
         self.setMouseTracking(True)
-        self.setFixedHeight(31)
+        self.setFixedHeight(22)
         if self.is_add:
             self.setFixedWidth(32)
         else:
@@ -336,14 +494,14 @@ class TabButton(QWidget):
 
     def sizeHint(self):
         if self.is_add:
-            return QSize(32, 28)
+            return QSize(28, 22)
         fm = self.fontMetrics()
         width = max(120, fm.horizontalAdvance(self.title) + 38)
-        return QSize(width, 28)
+        return QSize(width, 22)
 
     def close_rect(self):
-        r = self.rect().adjusted(0, 0, 0, -2)
-        return QRectF(r.right() - 20, r.center().y() - 7, 14, 14)
+        r = self.rect()
+        return QRectF(r.right() - 20, r.center().y() - 6, 14, 14)
 
     def enterEvent(self, event):
         self.hovered = True
@@ -352,8 +510,16 @@ class TabButton(QWidget):
 
     def leaveEvent(self, event):
         self.hovered = False
+        self.close_hovered = False
         self.update()
         super().leaveEvent(event)
+
+    def mouseMoveEvent(self, event):
+        close_hovered = self.hovered and not self.is_add and self.close_rect().contains(event.position())
+        if close_hovered != self.close_hovered:
+            self.close_hovered = close_hovered
+            self.update()
+        super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton:
@@ -366,7 +532,7 @@ class TabButton(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
 
-        r = QRectF(self.rect()).adjusted(1, 2, -1, -5)
+        r = QRectF(self.rect()).adjusted(1, 0, -1, 0)
 
         if self.is_add:
             bg = QColor("#2f2f2f00") if not self.hovered else QColor("#3a3a3a")
@@ -407,11 +573,10 @@ class TabButton(QWidget):
 
         if self.hovered:
             cr = self.close_rect()
-            close_path = QPainterPath()
-            close_path.addRoundedRect(cr, 3, 3)
-            p.fillPath(close_path, QColor("#00000000"))
-            p.setPen(QPen(QColor("#66666600"), 0))
-            p.drawPath(close_path)
+            if self.close_hovered:
+                close_path = QPainterPath()
+                close_path.addRoundedRect(cr, 3, 3)
+                p.fillPath(close_path, QColor("#4a4a4a"))
 
             p.setPen(QPen(QColor("#efefef"), 1.4))
             pad = 4
@@ -451,17 +616,17 @@ class BottomTabBar(QWidget):
         self.current_index = -1
 
         self.setFixedHeight(34)
-        self.setStyleSheet("background:#1a1a1a;")
+        self.setStyleSheet("background:#202020;")
 
         self.scroll = QScrollArea(self)
         self.scroll.setWidgetResizable(False)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll.setFrameShape(QFrame.NoFrame)
-        self.scroll.setStyleSheet("background:#1a1a1a; border:none;")
+        self.scroll.setStyleSheet("background:#202020; border:none;")
 
         self.inner = QWidget()
-        self.inner.setStyleSheet("background:#1a1a1a;")
+        self.inner.setStyleSheet("background:#202020;")
         self.inner_layout = QHBoxLayout(self.inner)
         self.inner_layout.setContentsMargins(6, 0, 6, 0)
         self.inner_layout.setSpacing(3)
@@ -469,12 +634,10 @@ class BottomTabBar(QWidget):
 
         self.left_arrow = QPushButton("◀", self)
         self.left_arrow.setFixedSize(22, 22)
-        self.left_arrow.setCursor(Qt.PointingHandCursor)
         self.left_arrow.setFocusPolicy(Qt.NoFocus)
 
         self.right_arrow = QPushButton("▶", self)
         self.right_arrow.setFixedSize(22, 22)
-        self.right_arrow.setCursor(Qt.PointingHandCursor)
         self.right_arrow.setFocusPolicy(Qt.NoFocus)
 
         tool_btn_style = """
@@ -506,7 +669,6 @@ class BottomTabBar(QWidget):
         
         self.add_button = QPushButton("+", self)
         self.add_button.setFixedSize(22, 22)
-        self.add_button.setCursor(Qt.PointingHandCursor)
         self.add_button.setStyleSheet(tool_btn_style)
         self.add_button.setFocusPolicy(Qt.NoFocus)
         
@@ -560,7 +722,7 @@ class BottomTabBar(QWidget):
         margin_left = 6
         margin_right = 6
         spacing = 4
-        y_offset = -2   # 按钮整体上移 2 像素
+        y_offset = 0
 
         arrow_w = self.left_arrow.width()
         add_w = self.add_button.width()
@@ -647,11 +809,10 @@ class DropPanel(QFrame):
 
         self.preview = QLabel()
         self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setStyleSheet("background:#2a2a2a; border:none;")
+        self.preview.setStyleSheet("background:#2a2a2a; border:none; border-radius:6px;")
         layout.addWidget(self.preview, 1)
 
         self.button = QPushButton(text, self.preview)
-        self.button.setCursor(Qt.PointingHandCursor)
         self.button.setFixedSize(96, 96)
         self.button.setStyleSheet("""
             QPushButton {
@@ -661,6 +822,12 @@ class DropPanel(QFrame):
                 border-radius: 10px;
                 font: bold 18pt "Microsoft YaHei";
                 padding: 0px;
+            }
+            QPushButton:hover {
+                background: #3a3a3a;
+            }
+            QPushButton:pressed {
+                background: #262626;
             }
         """)
         self.button.clicked.connect(lambda: self.compare_tab.open_file(self.side))

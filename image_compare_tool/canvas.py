@@ -8,6 +8,11 @@ from .constants import LABEL_STYLE_DEFAULTS
 from .dnd import accept_drop_if_has_file, handle_drop_event
 from .image_utils import pil_to_qimage, prepare_compare_images, to_grayscale_rgba
 
+ZOOM_STEP = 1.1
+MIN_ZOOM = 0.4 / ZOOM_STEP
+MAX_ZOOM = 2.0 * ZOOM_STEP
+
+
 class CompareCanvas(QWidget):
     def __init__(self, parent=None, compare_tab=None):
         super().__init__(parent)
@@ -90,7 +95,7 @@ class CompareCanvas(QWidget):
             return QImage()
 
         image = QImage(target_w, target_h, QImage.Format_RGBA8888)
-        image.fill(QColor("#1a1a1a"))
+        image.fill(QColor("#202020"))
 
         p = QPainter(image)
         p.setRenderHint(QPainter.Antialiasing, True)
@@ -331,8 +336,8 @@ class CompareCanvas(QWidget):
         wx = self.vp_x + mx / self.zoom
         wy = self.vp_y + my / self.zoom
 
-        factor = 1.1 if event.angleDelta().y() > 0 else 1 / 1.1
-        self.zoom = max(0.4, min(self.zoom * factor, 2.0))
+        factor = ZOOM_STEP if event.angleDelta().y() > 0 else 1 / ZOOM_STEP
+        self.zoom = max(MIN_ZOOM, min(self.zoom * factor, MAX_ZOOM))
 
         self.vp_x = wx - mx / self.zoom
         self.vp_y = wy - my / self.zoom
@@ -345,7 +350,7 @@ class CompareCanvas(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        p.fillRect(self.rect(), QColor("#1a1a1a"))
+        p.fillRect(self.rect(), QColor("#202020"))
 
         if self.pm_a is None or self.pm_b is None:
             p.end()

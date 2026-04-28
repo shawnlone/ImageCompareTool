@@ -25,6 +25,7 @@ def set_windows_app_id():
 def main():
     set_windows_app_id()
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     app.setApplicationName("图片对比工具")
     app.setWindowIcon(QIcon(resource_path("app.ico")))
 

@@ -1,19 +1,207 @@
 import json
 import os
 import sys
+import ctypes
 
-from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QAction, QCursor, QIcon, QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QTimer, Qt
+from PySide6.QtGui import QAction, QColor, QCursor, QIcon, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow,
-    QMenu, QMessageBox, QPushButton, QScrollArea, QStackedLayout,
-    QVBoxLayout, QWidget
+    QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMenu,
+    QMessageBox, QPushButton, QScrollArea, QStackedLayout, QVBoxLayout, QWidget
 )
 
 from .constants import DEFAULT_TAB_TITLE, LABEL_STYLE_DEFAULTS, PROJECT_FILTER
 from .image_utils import get_config_path, resource_path
 from .tab import CompareTab
-from .widgets import BottomTabBar, LabelStyleDialog
+from .widgets import BottomTabBar, LabelStyleDialog, RoundedDialog
+
+
+class WindowControlButton(QPushButton):
+    def __init__(self, kind, parent=None):
+        super().__init__(parent)
+        self.kind = kind
+        self.setFixedSize(30, 26)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setCheckable(kind == "pin")
+        self.setObjectName("CloseWindowButton" if kind == "close" else "WindowControlButton")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        checked = self.isChecked()
+        icon_color = QColor("#ffffff" if self.kind == "close" and self.underMouse() else "#d7dce2")
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(QPen(icon_color, 1.35, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        center = QRectF(self.rect()).center()
+        cx = center.x()
+        cy = center.y()
+
+        if self.kind == "minimize":
+            p.drawLine(QPointF(cx - 4, cy + 1), QPointF(cx + 4, cy + 1))
+        elif self.kind == "maximize":
+            if self.window().isMaximized():
+                p.drawRect(QRectF(cx - 1.5, cy - 4.5, 7, 7))
+                p.drawRect(QRectF(cx - 4.5, cy - 1.5, 7, 7))
+            else:
+                p.drawRect(QRectF(cx - 4, cy - 4, 8, 8))
+        elif self.kind == "close":
+            p.drawLine(QPointF(cx - 4, cy - 4), QPointF(cx + 4, cy + 4))
+            p.drawLine(QPointF(cx + 4, cy - 4), QPointF(cx - 4, cy + 4))
+        elif self.kind == "pin":
+            p.drawLine(QPointF(cx, cy - 6), QPointF(cx, cy + 1))
+            p.drawLine(QPointF(cx - 3, cy - 2), QPointF(cx, cy + 1))
+            p.drawLine(QPointF(cx + 3, cy - 2), QPointF(cx, cy + 1))
+            p.drawLine(QPointF(cx - 5, cy + 5), QPointF(cx + 5, cy + 5))
+
+
+class TitleBar(QWidget):
+    def __init__(self, main_window):
+        super().__init__(main_window)
+        self.main_window = main_window
+        self.drag_start_global = None
+        self.drag_start_frame = None
+        self.setFixedHeight(34)
+        self.setObjectName("TitleBar")
+
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(22, 22)
+        icon = QIcon(resource_path("app.ico"))
+        self.icon_label.setPixmap(icon.pixmap(18, 18))
+        self.icon_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+        self.title_label = QLabel(main_window.base_title)
+        self.title_label.setObjectName("TitleText")
+        self.title_label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.title_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+        self.pin_button = WindowControlButton("pin")
+        self.min_button = WindowControlButton("minimize")
+        self.max_button = WindowControlButton("maximize")
+        self.close_button = WindowControlButton("close")
+
+        self.pin_button.setToolTip("置顶")
+        self.min_button.setToolTip("最小化")
+        self.max_button.setToolTip("最大化")
+        self.close_button.setToolTip("关闭")
+
+        self.pin_button.clicked.connect(main_window.toggle_always_on_top)
+        self.min_button.clicked.connect(main_window.showMinimized)
+        self.max_button.clicked.connect(self.toggle_max_restore)
+        self.close_button.clicked.connect(main_window.close)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 4, 0)
+        layout.setSpacing(3)
+        layout.addWidget(self.icon_label, 0, Qt.AlignVCenter)
+        layout.addWidget(self.title_label, 1)
+        layout.addWidget(self.pin_button, 0)
+        layout.addWidget(self.min_button, 0)
+        layout.addWidget(self.max_button, 0)
+        layout.addWidget(self.close_button, 0)
+
+    def set_title(self, title):
+        self.title_label.setText(title)
+
+    def set_pinned(self, pinned):
+        self.pin_button.setChecked(pinned)
+
+    def refresh_window_state(self):
+        if self.main_window.isMaximized():
+            self.max_button.setToolTip("还原")
+        else:
+            self.max_button.setToolTip("最大化")
+        self.max_button.update()
+
+    def toggle_max_restore(self):
+        if self.main_window.isMaximized():
+            self.main_window.showNormal()
+        else:
+            self.main_window.showMaximized()
+        self.refresh_window_state()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.toggle_max_restore()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            window_handle = self.main_window.windowHandle()
+            if window_handle is not None and window_handle.startSystemMove():
+                self.drag_start_global = None
+                self.drag_start_frame = None
+                event.accept()
+                return
+            self.drag_start_global = event.globalPosition().toPoint()
+            self.drag_start_frame = self.main_window.frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (
+            event.buttons() & Qt.LeftButton
+            and self.drag_start_global is not None
+            and self.drag_start_frame is not None
+            and not self.main_window.isMaximized()
+        ):
+            delta = event.globalPosition().toPoint() - self.drag_start_global
+            self.main_window.move(self.drag_start_frame + delta)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.drag_start_global = None
+        self.drag_start_frame = None
+        super().mouseReleaseEvent(event)
+
+
+class ShadowHost(QWidget):
+    def __init__(self):
+        super().__init__()
+        self._frame_widget = None
+        self._shadow_enabled = True
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+    def set_frame_widget(self, widget):
+        self._frame_widget = widget
+        self.update()
+
+    def set_shadow_enabled(self, enabled):
+        self._shadow_enabled = enabled
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._frame_widget is None:
+            return
+
+        frame_rect = self._frame_widget.geometry()
+        if frame_rect.isEmpty():
+            return
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        if self._shadow_enabled:
+            for i in range(5, 0, -1):
+                alpha = max(0, 12 - i * 2)
+                if alpha <= 0:
+                    continue
+                rect = frame_rect.adjusted(-i, -i, i, i + 2)
+                p.setBrush(QColor(0, 0, 0, alpha))
+                p.drawRoundedRect(rect, 8 + i, 8 + i)
+
+        bg_rect = QRectF(frame_rect).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setBrush(QColor("#202020"))
+        p.drawRoundedRect(bg_rect, 8, 8)
+        p.setPen(QPen(QColor("#303030"), 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(bg_rect, 8, 8)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -25,9 +213,13 @@ class MainWindow(QMainWindow):
 
         self.tabs = []
         self.current_tab_index = -1
+        self._resize_margin = 4
 
         self.update_window_title()
         self.setWindowIcon(QIcon(resource_path("app.ico")))
+        self.setWindowFlag(Qt.FramelessWindowHint, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setMouseTracking(True)
         self.resize(1400, 800)
         self.setMinimumSize(800, 500)
 
@@ -37,12 +229,11 @@ class MainWindow(QMainWindow):
         self.tab_bar.close_requested.connect(self.close_tab)
 
         self.help_button = QPushButton("≡")
-        self.help_button.setFixedSize(28, 22)
-        self.help_button.setCursor(Qt.PointingHandCursor)
+        self.help_button.setFixedSize(24, 22)
         self.help_button.setFocusPolicy(Qt.NoFocus)
         self.help_button.setStyleSheet("""
             QPushButton {
-                background: #1a1a1a;
+                background: #202020;
                 color: #bbbbbb;
                 border-radius: 4px;
                 font: 17pt "Microsoft YaHei";
@@ -55,6 +246,7 @@ class MainWindow(QMainWindow):
         """)
         self.help_button.pressed.connect(self.show_bottom_left_menu)
         self.bottom_menu = QMenu(self)
+        self.bottom_menu.setFixedWidth(100)
         self.bottom_menu.setStyleSheet("""
             QMenu {
                 background-color: #232323;
@@ -64,7 +256,7 @@ class MainWindow(QMainWindow):
             }
             QMenu::item {
                 background-color: transparent;
-                padding: 8px 20px 8px 18px;
+                padding: 6px 10px 6px 18px;
             }
             QMenu::item:selected {
                 background-color: #3a3a3a;
@@ -74,21 +266,29 @@ class MainWindow(QMainWindow):
                 color: #666666;
                 background-color: transparent;
             }
+            QMenu::separator {
+                height: 1px;
+                background: #303030;
+                margin: 4px 6px;
+            }
         """)
 
         self.action_open_project = QAction("打开工程", self)
         self.action_save_project = QAction("保存工程", self)
+        self.action_compare_settings = QAction("对比设置", self)
         self.action_help_info = QAction("操作帮助", self)
         self.action_about = QAction("关于", self)
 
         self.action_open_project.triggered.connect(self.open_project_from_menu)
         self.action_save_project.triggered.connect(self.save_current_project)
+        self.action_compare_settings.triggered.connect(self.open_label_style_dialog)
         self.action_help_info.triggered.connect(self.toggle_help_popup)
         self.action_about.triggered.connect(self.show_about_dialog)
 
         self.bottom_menu.addAction(self.action_open_project)
         self.bottom_menu.addAction(self.action_save_project)
         self.bottom_menu.addSeparator()
+        self.bottom_menu.addAction(self.action_compare_settings)
         self.bottom_menu.addAction(self.action_help_info)
         self.bottom_menu.addAction(self.action_about)
         self.bottom_menu.aboutToHide.connect(lambda: self.help_button.setDown(False))
@@ -103,11 +303,14 @@ class MainWindow(QMainWindow):
         )
 
         self.bottom_bar_widget = QWidget()
+        self.bottom_bar_widget.setObjectName("BottomBar")
         self.bottom_bar_widget.setFixedHeight(34)
-        self.bottom_bar_widget.setStyleSheet("background:#1a1a1a;")
+        self.bottom_bar_widget.setStyleSheet(
+            "background:transparent; border:none;"
+        )
 
         bottom_layout = QHBoxLayout(self.bottom_bar_widget)
-        bottom_layout.setContentsMargins(5, 3, 10, 3)
+        bottom_layout.setContentsMargins(10, 0, 10, 0)
         bottom_layout.setSpacing(6)
         bottom_layout.addWidget(self.help_button, 0)
         bottom_layout.addWidget(self.tab_bar, 1)
@@ -121,17 +324,41 @@ class MainWindow(QMainWindow):
         self.central_stack_host.setLayout(self.central_stack)
 
         self.root_widget = QWidget()
+        self.root_widget.setObjectName("RootWidget")
+        self.root_widget.setStyleSheet(
+            "background:transparent; border:none;"
+        )
         root_layout = QVBoxLayout(self.root_widget)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
         root_layout.addWidget(self.central_stack_host, 1)
         root_layout.addWidget(self.bottom_bar_widget, 0)
 
-        self.setCentralWidget(self.root_widget)
+        self.title_bar = TitleBar(self)
+
+        self.window_frame = QWidget()
+        self.window_frame.setObjectName("WindowFrame")
+        frame_layout = QVBoxLayout(self.window_frame)
+        frame_layout.setContentsMargins(1, 1, 1, 1)
+        frame_layout.setSpacing(0)
+        frame_layout.addWidget(self.title_bar, 0)
+        frame_layout.addWidget(self.root_widget, 1)
+
+        self.window_host = ShadowHost()
+        self.window_host.setObjectName("WindowHost")
+        self.window_host.setMouseTracking(True)
+        self.window_host_layout = QVBoxLayout(self.window_host)
+        self.window_host_layout.setContentsMargins(14, 10, 14, 22)
+        self.window_host_layout.setSpacing(0)
+        self.window_host_layout.addWidget(self.window_frame)
+        self.window_host.set_frame_widget(self.window_frame)
+
+        self.setCentralWidget(self.window_host)
 
         self._apply_style()
         self._setup_actions()
         self.apply_always_on_top()
+        self._update_window_chrome()
 
         app = QApplication.instance()
         if app is not None:
@@ -141,32 +368,273 @@ class MainWindow(QMainWindow):
 
     def _apply_style(self):
         self.setStyleSheet("""
-            QMainWindow, QWidget {
-                background: #1e1e1e;
-                color: white;
+            QMainWindow {
+                background: transparent;
+            }
+            QWidget#WindowHost {
+                background: transparent;
+            }
+            QWidget#WindowFrame {
+                background: transparent;
+                border: none;
+                border-radius: 8px;
+            }
+            QWidget#TitleBar {
+                background: transparent;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                border-bottom: 1px solid #262626;
+            }
+            QWidget#RootWidget {
+                background: transparent;
+                border-bottom-left-radius: 8px;
+                border-bottom-right-radius: 8px;
+            }
+            QWidget#BottomBar {
+                background: transparent;
+                border-bottom-left-radius: 0px;
+                border-bottom-right-radius: 0px;
+            }
+            QLabel#TitleText {
+                color: #edf1f7;
+                font: 10pt "Microsoft YaHei UI";
+            }
+            QWidget {
+                background: #202020;
+                color: #f2f4f8;
             }
             QFrame#DropPanel {
                 background: #2a2a2a;
                 border: none;
-                border-radius: 0px;
+                border-radius: 8px;
             }
             QPushButton {
-                background: #3a3a3a;
-                color: #999;
+                background: #303030;
+                color: #c5ccd8;
                 border: none;
-                border-radius: 0px;
+                border-radius: 6px;
                 font: bold 12pt "Microsoft YaHei";
                 padding: 0px;
             }
             QPushButton:hover {
-                background: #4a4a4a;
+                background: #3a3a3a;
                 color: white;
+            }
+            QPushButton:pressed {
+                background: #262626;
+            }
+            QPushButton#WindowControlButton {
+                background: transparent;
+                border: none;
+                border-radius: 5px;
+                padding: 0px;
+                font: 10pt "Microsoft YaHei UI";
+            }
+            QPushButton#WindowControlButton:hover {
+                background: #343843;
+            }
+            QPushButton#WindowControlButton:pressed {
+                background: #2a2d35;
+            }
+            QPushButton#WindowControlButton:checked {
+                background: #2a2d35;
+            }
+            QPushButton#WindowControlButton:checked:hover {
+                background: #343843;
+            }
+            QPushButton#CloseWindowButton {
+                background: transparent;
+                border: none;
+                border-radius: 5px;
+                padding: 0px;
+            }
+            QPushButton#CloseWindowButton:hover {
+                background: #c42b1c;
+            }
+            QPushButton#CloseWindowButton:pressed {
+                background: #9f2318;
             }
             QScrollArea {
                 border: none;
-                background: #1a1a1a;
+                background: #202020;
+            }
+            QToolTip {
+                background-color: #2a2d34;
+                color: #f4f4f4;
+                border: 1px solid #454a56;
+                padding: 4px 7px;
+                border-radius: 5px;
             }
         """)
+
+    def _update_window_chrome(self):
+        maximized = self.isMaximized()
+        left = top = right = bottom = 0
+        if not maximized:
+            left, top, right, bottom = 14, 10, 14, 22
+        radius = 0 if maximized else 8
+        control_radius = 0 if maximized else 5
+        self.window_host_layout.setContentsMargins(left, top, right, bottom)
+        self.window_host.set_shadow_enabled(not maximized)
+        self.window_frame.setStyleSheet(f"""
+            QWidget#WindowFrame {{
+                background: transparent;
+                border: none;
+                border-radius: {radius}px;
+            }}
+            QWidget#TitleBar {{
+                background: transparent;
+                border-bottom: 1px solid #262626;
+                border-top-left-radius: {radius}px;
+                border-top-right-radius: {radius}px;
+            }}
+            QWidget#RootWidget {{
+                background: transparent;
+                border-bottom-left-radius: {radius}px;
+                border-bottom-right-radius: {radius}px;
+            }}
+            QWidget#BottomBar {{
+                background: transparent;
+                border-bottom-left-radius: 0px;
+                border-bottom-right-radius: 0px;
+            }}
+            QPushButton#WindowControlButton {{
+                background: transparent;
+                border: none;
+                border-radius: {control_radius}px;
+                padding: 0px;
+            }}
+            QPushButton#WindowControlButton:hover {{
+                background: #343843;
+            }}
+            QPushButton#WindowControlButton:pressed {{
+                background: #2a2d35;
+            }}
+            QPushButton#WindowControlButton:checked {{
+                background: #2a2d35;
+            }}
+            QPushButton#WindowControlButton:checked:hover {{
+                background: #343843;
+            }}
+            QPushButton#CloseWindowButton {{
+                background: transparent;
+                border: none;
+                border-radius: {control_radius}px;
+                padding: 0px;
+            }}
+            QPushButton#CloseWindowButton:hover {{
+                background: #c42b1c;
+            }}
+            QPushButton#CloseWindowButton:pressed {{
+                background: #9f2318;
+            }}
+        """)
+        self.title_bar.refresh_window_state()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange:
+            self.unsetCursor()
+            self._update_window_chrome()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "window_frame"):
+            QTimer.singleShot(0, self._refresh_cursor_under_mouse)
+
+    def _resize_edges_at(self, pos):
+        if self.isMaximized():
+            return Qt.Edges()
+
+        border = self._resize_margin
+        frame_rect = QRect(self.window_frame.mapTo(self, QPoint(0, 0)), self.window_frame.size())
+        outer = frame_rect.adjusted(-border, -border, border, border)
+        inner = frame_rect.adjusted(border, border, -border, -border)
+
+        if not outer.contains(pos) or inner.contains(pos):
+            return Qt.Edges()
+
+        left = pos.x() <= frame_rect.left() + border
+        right = pos.x() >= frame_rect.right() - border
+        top = pos.y() <= frame_rect.top() + border
+        bottom = pos.y() >= frame_rect.bottom() - border
+
+        edges = Qt.Edges()
+        if left:
+            edges |= Qt.LeftEdge
+        if right:
+            edges |= Qt.RightEdge
+        if top:
+            edges |= Qt.TopEdge
+        if bottom:
+            edges |= Qt.BottomEdge
+        return edges
+
+    def _update_resize_cursor(self, pos):
+        edges = self._resize_edges_at(pos)
+        if edges in (Qt.LeftEdge | Qt.TopEdge, Qt.RightEdge | Qt.BottomEdge):
+            self.setCursor(Qt.SizeFDiagCursor)
+        elif edges in (Qt.RightEdge | Qt.TopEdge, Qt.LeftEdge | Qt.BottomEdge):
+            self.setCursor(Qt.SizeBDiagCursor)
+        elif edges & (Qt.LeftEdge | Qt.RightEdge):
+            self.setCursor(Qt.SizeHorCursor)
+        elif edges & (Qt.TopEdge | Qt.BottomEdge):
+            self.setCursor(Qt.SizeVerCursor)
+        else:
+            self.unsetCursor()
+
+    def _refresh_cursor_under_mouse(self):
+        if not self.isVisible() or self.isMinimized():
+            self.unsetCursor()
+            return
+        pos = self.mapFromGlobal(QCursor.pos())
+        frame_rect = QRect(self.window_frame.mapTo(self, QPoint(0, 0)), self.window_frame.size())
+        if frame_rect.adjusted(-self._resize_margin, -self._resize_margin, self._resize_margin, self._resize_margin).contains(pos):
+            self._update_resize_cursor(pos)
+        else:
+            self.unsetCursor()
+
+    def _handle_resize_mouse_event(self, event):
+        if event.type() in (QEvent.Leave, QEvent.MouseButtonRelease):
+            self.unsetCursor()
+            return False
+
+        if not hasattr(event, "position"):
+            return False
+        pos = self.mapFromGlobal(event.globalPosition().toPoint())
+        edges = self._resize_edges_at(pos)
+
+        if event.type() == QEvent.MouseMove:
+            self._update_resize_cursor(pos)
+            return False
+
+        if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton and edges:
+            window_handle = self.windowHandle()
+            if window_handle is not None and window_handle.startSystemResize(edges):
+                return True
+        return False
+
+    def mouseMoveEvent(self, event):
+        self._update_resize_cursor(event.position().toPoint())
+        super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            edges = self._resize_edges_at(event.position().toPoint())
+            if edges:
+                window_handle = self.windowHandle()
+                if window_handle is not None and window_handle.startSystemResize(edges):
+                    event.accept()
+                    return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.unsetCursor()
+        super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event):
+        self.unsetCursor()
+        super().leaveEvent(event)
 
     def _setup_actions(self):
         paste_action = QAction(self)
@@ -282,15 +750,27 @@ class MainWindow(QMainWindow):
         self.refresh_tab_bar()
 
     def update_window_title(self):
-        if self.always_on_top:
-            self.setWindowTitle(f"{self.base_title}   📌")
-        else:
-            self.setWindowTitle(self.base_title)
+        title = self.base_title
+        self.setWindowTitle(title)
+        if hasattr(self, "title_bar"):
+            self.title_bar.set_title(title)
+            self.title_bar.set_pinned(self.always_on_top)
 
     def apply_always_on_top(self):
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, self.always_on_top)
-        self.show()
+        if sys.platform == "win32":
+            hwnd = int(self.winId())
+            hwnd_insert_after = -1 if self.always_on_top else -2  # HWND_TOPMOST / HWND_NOTOPMOST
+            flags = 0x0001 | 0x0002  # SWP_NOSIZE | SWP_NOMOVE
+            ok = ctypes.windll.user32.SetWindowPos(hwnd, hwnd_insert_after, 0, 0, 0, 0, flags)
+            if not ok:
+                self.setWindowFlag(Qt.WindowStaysOnTopHint, self.always_on_top)
+                self.show()
+        else:
+            self.setWindowFlag(Qt.WindowStaysOnTopHint, self.always_on_top)
+            self.show()
         self.update_window_title()
+        if hasattr(self, "title_bar"):
+            self._update_window_chrome()
 
     def toggle_always_on_top(self):
         self.always_on_top = not self.always_on_top
@@ -308,6 +788,10 @@ class MainWindow(QMainWindow):
         if tab is None:
             return False
         return tab.img_a is not None and tab.img_b is not None and tab.is_compare_mode()
+
+    def current_tab_can_open_compare_settings(self):
+        tab = self.current_tab()
+        return tab is not None and tab.is_compare_mode()
 
     def open_project_from_menu(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -334,6 +818,7 @@ class MainWindow(QMainWindow):
 
     def show_bottom_left_menu(self):
         self.action_save_project.setEnabled(self.current_tab_can_save_project())
+        self.action_compare_settings.setEnabled(self.current_tab_can_open_compare_settings())
         self.help_button.setDown(True)
 
         menu_pos = self.bottom_bar_widget.mapToGlobal(
@@ -346,12 +831,13 @@ class MainWindow(QMainWindow):
 
 
     def show_about_dialog(self):
-        box = QMessageBox(self)
-        box.setWindowTitle("关于")
-        box.setTextFormat(Qt.RichText)
-        box.setIcon(QMessageBox.Information)
-        box.setText(
-            f"""
+        dialog = RoundedDialog("关于", self)
+        dialog.setMinimumWidth(440)
+        dialog.setMinimumHeight(210)
+        dialog.content_layout.setContentsMargins(24, 22, 24, 22)
+
+        content = QLabel(
+            """
             <div style="line-height:1.7;">
                 <div style="font-size:16px; font-weight:bold; color:#ffffff;">
                     图片对比工具
@@ -364,32 +850,11 @@ class MainWindow(QMainWindow):
             </div>
             """
         )
-        box.setStandardButtons(QMessageBox.Ok)
-        box.setStyleSheet("""
-            QMessageBox {
-                background-color: #1e1e1e;
-                color: white;
-            }
-            QLabel {
-                color: white;
-            }
-            QPushButton {
-                background-color: #3a3a3a;
-                color: white;
-                border: 1px solid #555;
-                border-radius: 4px;
-                padding: 5px 12px;
-                min-width: 80px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #4a4a4a;
-            }
-            QPushButton:pressed {
-                background-color: #2f2f2f;
-            }
-        """)
-        box.exec()
+        content.setTextFormat(Qt.RichText)
+        content.setOpenExternalLinks(True)
+        content.setWordWrap(True)
+        dialog.content_layout.addWidget(content)
+        dialog.exec()
 
     def toggle_help_popup(self):
         tab = self.current_tab()
@@ -468,6 +933,17 @@ class MainWindow(QMainWindow):
             print(f"保存配置失败: {e}", file=sys.stderr)
 
     def eventFilter(self, obj, event):
+        if event.type() in (QEvent.MouseButtonRelease, QEvent.WindowDeactivate, QEvent.ApplicationDeactivate):
+            self.unsetCursor()
+
+        if event.type() == QEvent.MouseMove:
+            widget = obj if isinstance(obj, QWidget) else None
+            if widget is not None and (widget == self or self.isAncestorOf(widget)):
+                self._refresh_cursor_under_mouse()
+
+        if obj in (self.window_host, self.window_frame) and self._handle_resize_mouse_event(event):
+            return True
+
         tab = self.current_tab()
         if tab and tab.help_popup.isVisible():
             if event.type() in (QEvent.MouseButtonPress, QEvent.WindowDeactivate, QEvent.ApplicationDeactivate):
