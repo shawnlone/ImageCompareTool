@@ -9,8 +9,8 @@ from .dnd import accept_drop_if_has_file, handle_drop_event
 from .image_utils import pil_to_qimage, prepare_compare_images, to_grayscale_rgba
 
 ZOOM_STEP = 1.1
-MIN_ZOOM = 0.4 / ZOOM_STEP
-MAX_ZOOM = 2.0 * ZOOM_STEP
+MIN_ZOOM = 0.25
+MAX_ZOOM = 3.0
 VIEW_MODE_SPLIT = "split"
 VIEW_MODE_HORIZONTAL = "horizontal"
 HORIZONTAL_GAP = 2
